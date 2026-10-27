@@ -758,11 +758,11 @@ class Server:
 
     def _tool_cad_observation(self, arguments, context):
         if not secrets.compare_digest(str(arguments.get("app") or ""), self._app_token):
-            raise ToolFailed("Only the CAD app can save an observation.", "not_app")
+            raise ToolFailed("Only the CAD app can save an observation.", "bad_request")
         try:
             path = self.tunnel.app.exports.save(arguments.get("source"), arguments.get("destination"))
         except (ValueError, OSError) as error:
-            raise ToolFailed(str(error), "observation_failed") from error
+            raise ToolFailed(str(error), "view_error") from error
         return _text("The native CAD observation was saved.", {"file": path})
 
     def _cards(self, context: RequestContext) -> bool | None:
