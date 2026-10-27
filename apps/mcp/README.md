@@ -91,14 +91,18 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
 - **Saved observations belong to their host.** A host that keeps immutable generated documents
   alongside a conversation declares `dev.texttocad/observations: {version: 1}` in initialize's
   extensions. Successful `cad_open` and delivered `cad_show` results then include
-  `_meta["dev.texttocad/observation"]`: the canonical selected file and its SHA-256, or a served
-  native document's `{doc, revision}`. The latter is saved by the app-only `cad_observation`
-  tool, with that exact source, an absolute destination and the app capability. It uses the
-  viewer's export jobs and revision guards; a changed source, failed export or timeout is an
-  unavailable observation, never permission to substitute the latest geometry. XBF retains
-  native materials, mechanisms, configurations and motion. Files are copied byte for byte by
-  the host and checked against their observed SHA-256; external GLB resources and DXF xrefs or
-  image dependencies are unavailable rather than copying an arbitrary dependency tree.
+  `_meta["dev.texttocad/observation"]`: a complete frozen temporary artifact described by
+  `{version: 1, file, format, sha256, sizeBytes, source, revision}`, or `{error}` when capture
+  is unavailable. `file` is an absolute runtime-host path, `format` its extension without a
+  dot, and `source`/`revision` identify the document selected by that operation. The runtime
+  finishes capture before returning, using the viewer's existing export jobs and revision
+  guards. A changed source, failed export or timeout never substitutes newer geometry.
+  XBF retains native materials, mechanisms, configurations and motion. Self-contained files
+  are copied byte for byte; external GLB resources and DXF xrefs or image dependencies are
+  refused rather than copying an arbitrary dependency tree. The host ingests opaque bytes
+  and verifies their size and SHA-256 before storing them in its existing attachment store.
+  Runtime artifacts remain session-owned and expire after ten minutes, as viewer exports do;
+  the host must adopt them before expiry. They are not permanent runtime history.
   Once storage succeeds, the host calls `cad_file` with `observation: true`. Its metadata advertises
   `dev.texttocad/observation: 1`; the returned protocol-10 launch has `surface: observation`.
   This view renders only that saved file, without joining live views, following agent shows,

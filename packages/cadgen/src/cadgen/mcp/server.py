@@ -552,13 +552,6 @@ class Server:
                 _object({"requestId": {"type": "string"}, "png": {"type": "string"}, "error": {"type": "string"},
                          _APP_TOKEN_ARGUMENT: _APP_TOKEN_SCHEMA}, ["requestId", _APP_TOKEN_ARGUMENT])),
         ]
-        if self._observations:
-            tool = app("cad_observation", "Save CAD observation", "Save a host-owned native document at the observed revision.",
-                       _object({"source": _object({"doc": {"type": "string"}, "revision": {"type": "string"}}, ["doc", "revision"]),
-                                "destination": {"type": "string"}, _APP_TOKEN_ARGUMENT: _APP_TOKEN_SCHEMA},
-                               ["source", "destination", _APP_TOKEN_ARGUMENT]))
-            tool["annotations"] = {**_READ_ONLY, "readOnlyHint": False}
-            tools.append(tool)
         return tools
 
     # -- calls -----------------------------------------------------------------
@@ -758,15 +751,6 @@ class Server:
             return _text(f"Saved observation of {os.path.basename(model)}.", {"launch": launch})
         # The host's own file tree is this surface's navigation: the page shows the file alone.
         return _text(f"{os.path.basename(model)} is open in CAD.", {"launch": self._launch(model, surface="file")})
-
-    def _tool_cad_observation(self, arguments, context):
-        if not secrets.compare_digest(str(arguments.get("app") or ""), self._app_token):
-            raise ToolFailed("Only the CAD app can save an observation.", "bad_request")
-        try:
-            path = self.tunnel.app.exports.save(arguments.get("source"), arguments.get("destination"))
-        except (ValueError, OSError) as error:
-            raise ToolFailed(str(error), "view_error") from error
-        return _text("The native CAD observation was saved.", {"file": path})
 
     def _cards(self, context: RequestContext) -> bool | None:
         """Whether this call's host shows CAD views: True, False, or None where nothing says yet. The

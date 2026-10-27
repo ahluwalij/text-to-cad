@@ -350,17 +350,48 @@ class TabServerTest(_Session):
             self.call("cad_sync", {"view": "saved", "surface": "observation", "model": self.loose})
         self.assertNotIn("saved", self.server.views)
 
-    def test_an_observation_host_receives_the_canonical_file_and_exact_bytes_with_open_and_show(self) -> None:
+    def test_an_observation_host_receives_frozen_bytes_before_open_and_show_return(self) -> None:
         capabilities = {"extensions": {**DECLARES_TABS["extensions"], "dev.texttocad/observations": {"version": 1}}}
         self.server.handle("initialize", {"clientInfo": OTHER_HOST, "capabilities": capabilities}, None)
+        self.addCleanup(lambda: self.server.tunnel.app.exports.close())
         opened = self.call("cad_open", {"source": self.bracket})
-        self.assertEqual(opened["_meta"]["dev.texttocad/observation"], {"source": self.bracket, "sha256": hashlib.sha256(STL).hexdigest()})
+        observed = opened["_meta"]["dev.texttocad/observation"]
+        self.assertEqual({key: value for key, value in observed.items() if key != "file"}, {
+            "version": 1, "format": "stl", "source": self.bracket,
+            "sha256": hashlib.sha256(STL).hexdigest(), "revision": hashlib.sha256(STL).hexdigest(), "sizeBytes": len(STL),
+        })
+        frozen = Path(observed["file"])
+        self.assertNotEqual(str(frozen), self.bracket)
+        Path(self.bracket).write_bytes(b"new geometry")
+        self.assertEqual(frozen.read_bytes(), STL)
         self.call("cad_sync", {"view": "live", "surface": "tab", "model": self.bracket})
         shown = self.call("cad_show", {"source": self.loose})
-        self.assertEqual(shown["_meta"]["dev.texttocad/observation"], {"source": self.loose, "sha256": hashlib.sha256(STL).hexdigest()})
-        denied = self.call("cad_observation", {"source": {"doc": "forged", "revision": "old"}, "destination": str(self.tmp / "forged.xbf")})
-        self.assertTrue(denied["isError"])
-        self.assertFalse((self.tmp / "forged.xbf").exists())
+        shown_file = Path(shown["_meta"]["dev.texttocad/observation"]["file"])
+        Path(self.loose).unlink()
+        self.assertEqual(shown_file.read_bytes(), STL)
+        self.assertNotIn("cad_observation", {tool["name"] for tool in self.server.tools()})
+        self.server.tunnel.app.exports.close()
+        self.assertFalse(frozen.exists())
+        self.assertFalse(shown_file.exists())
+
+    def test_observation_validates_frozen_glb_dependencies_in_the_runtime(self) -> None:
+        capabilities = {"extensions": {**DECLARES_TABS["extensions"], "dev.texttocad/observations": {"version": 1}}}
+        self.server.handle("initialize", {"clientInfo": OTHER_HOST, "capabilities": capabilities}, None)
+        self.addCleanup(lambda: self.server.tunnel.app.exports.close())
+        source = self.tmp / "model.glb"
+        for dependency in (None, "data:image/png;base64,AA==", "external.png"):
+            scene = {"asset": {"version": "2.0"}, "buffers": [{"byteLength": 0}]}
+            if dependency:
+                scene["images"] = [{"uri": dependency}]
+            body = json.dumps(scene).encode()
+            body += b" " * (-len(body) % 4)
+            source.write_bytes(b"glTF" + (2).to_bytes(4, "little") + (20 + len(body)).to_bytes(4, "little") +
+                               len(body).to_bytes(4, "little") + b"JSON" + body)
+            observed = self.call("cad_open", {"source": str(source)})["_meta"]["dev.texttocad/observation"]
+            if dependency == "external.png":
+                self.assertIn("external files", observed["error"])
+            else:
+                self.assertEqual(Path(observed["file"]).read_bytes(), source.read_bytes())
 
     def test_a_bad_path_is_the_tools_answer_not_a_protocol_error(self) -> None:
         missing = self.call("cad_open", {"source": str(self.workspace / "parts" / "nope.step")})
@@ -379,6 +410,7 @@ class TabServerTest(_Session):
         import ezdxf
         capabilities = {"extensions": {**DECLARES_TABS["extensions"], "dev.texttocad/observations": {"version": 1}}}
         self.server.handle("initialize", {"clientInfo": OTHER_HOST, "capabilities": capabilities}, None)
+        self.addCleanup(lambda: self.server.tunnel.app.exports.close())
         path = self.tmp / "drawing.dxf"
         drawing = ezdxf.new()
         drawing.modelspace().add_line((0, 0), (1, 1))

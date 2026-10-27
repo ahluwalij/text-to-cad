@@ -77,7 +77,9 @@ class ViewerExportHttpTest(unittest.TestCase):
 
     def test_observation_pins_native_revision_and_reopens_without_source_or_cache(self):
         import contextlib
+        import hashlib
         import json
+        import shutil
         import os
         import urllib.request
         import urllib.error
@@ -126,19 +128,14 @@ def hinge():
             opened = call('tools/call', {'name': 'cad_open', 'arguments': {'source': doc}})
             self.assertNotIn('isError', opened, opened)
             observed = opened['_meta']['dev.texttocad/observation']
-            self.assertIn('document', observed, observed)
-            self.assertEqual(observed['document']['doc'], doc)
+            self.assertEqual((observed['version'], observed['source'], observed['format']), (1, doc, 'xbf'))
+            frozen = Path(observed['file'])
+            self.assertTrue(frozen.is_file(), observed)
+            original_bytes = frozen.read_bytes()
+            self.assertEqual((observed['sizeBytes'], observed['sha256']),
+                             (len(original_bytes), hashlib.sha256(original_bytes).hexdigest()))
             archive = self.root / 'saved.xbf'
-            token = opened['_meta']['dev.texttocad/httpToken']
-            saved = call('tools/call', {'name': 'cad_observation', 'arguments': {
-                'source': observed['document'], 'destination': str(archive), 'app': token}})
-            self.assertNotIn('isError', saved, saved)
-            self.assertTrue(archive.is_file(), saved)
-            original_bytes = archive.read_bytes()
-            duplicate = call('tools/call', {'name': 'cad_observation', 'arguments': {
-                'source': observed['document'], 'destination': str(archive), 'app': token}})
-            self.assertTrue(duplicate.get('isError'), duplicate)
-            self.assertEqual(archive.read_bytes(), original_bytes, 'existing durable files are never overwritten')
+            shutil.copyfile(frozen, archive)  # the host adopts opaque frozen bytes before the runtime expires them
             session = request({'op': 'viewer', 'start': str(self.root), 'api_only': True})
 
             def http(path):
@@ -157,11 +154,11 @@ def hinge():
             self.assertTrue(any(part.get('material') for part in original['prototypes']), original['prototypes'])
             script.write_text(script.read_text(encoding='utf-8').replace('Box(10, 6, 2)', 'Box(20, 6, 2)'), encoding='utf-8')
             api.build_script(script, ['hinge'])
-            rejected = self.root / 'must-not-save.xbf'
-            result = call('tools/call', {'name': 'cad_observation', 'arguments': {
-                'source': observed['document'], 'destination': str(rejected), 'app': token}})
-            self.assertTrue(result.get('isError'), result)
-            self.assertFalse(rejected.exists())
+            changed = call('tools/call', {'name': 'cad_open', 'arguments': {'source': doc}})['_meta']['dev.texttocad/observation']
+            self.assertNotEqual(changed['revision'], observed['revision'])
+            self.assertNotEqual(changed['sha256'], observed['sha256'])
+            self.assertEqual(frozen.read_bytes(), original_bytes, 'later model revisions never replace an earlier artifact')
+            self.assertEqual(archive.read_bytes(), original_bytes)
             proxy.close()
             script.unlink()
             self.stop_engine()
