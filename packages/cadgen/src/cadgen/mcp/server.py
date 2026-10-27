@@ -86,7 +86,7 @@ TITLE = "CAD"
 # path (`page: viewer`) or the home (`page: home`, its recents with it), and carries what the page
 # needs to start on it alone (the server's version and platform); a view makes one call a second
 # (`cad_sync`) and reaches the viewer's routes through `cad_http`, by absolute path.
-PROTOCOL = 9
+PROTOCOL = 10
 _PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 _RESOURCE_NOT_FOUND = -32002
 EXTENSIONS = sorted(VIEWER_EXTENSIONS)
@@ -289,6 +289,7 @@ class Server:
         # ``_contacted`` once a view reached this server, which only a host that draws them does.
         self.renders: bool | None = None
         self._declared = False
+        self._observations = False
         self._contacted = False
         self._viewer_url = viewer_url
         self._browser_opener = browser_opener  # what opens a page's redirect file: ``webbrowser.open``
@@ -434,6 +435,7 @@ class Server:
         if presentation == "inline":
             self.page = self.page.presenting("inline")
         self._tools = None
+        self._observations = isinstance(offered.get("extensions"), dict) and offered["extensions"].get("dev.texttocad/observations") == {"version": 1}
         extensions = sorted(offered["extensions"]) if isinstance(offered.get("extensions"), dict) else []
         LOG.info("client %s %s: %s views, %s (extensions: %s)", client.get("name"), client.get("version"), presentation,
                  why, ", ".join(extensions) or "none")
@@ -475,9 +477,10 @@ class Server:
              "inputSchema": _object(), "icons": [ICON], "annotations": _READ_ONLY,
              "_meta": surface({"type": "thread"})},
             {"name": "cad_file", "title": TITLE, "description": "Open a CAD file in CAD.",
-             "inputSchema": _object({"file": _object({"name": {"type": "string"}, "resourceUri": {"type": "string"}}, ["resourceUri"])}, ["file"]),
+             "inputSchema": _object({"file": _object({"name": {"type": "string"}, "resourceUri": {"type": "string"}}, ["resourceUri"]),
+                                     "observation": {"type": "boolean"}}, ["file"]),
              "icons": [ICON], "annotations": _READ_ONLY,
-             "_meta": surface({"type": "file", "extensions": EXTENSIONS})},
+             "_meta": {**surface({"type": "file", "extensions": EXTENSIONS}), "dev.texttocad/observation": 1}},
             {"name": "cad_open", "title": TITLE, "icons": [ICON], "annotations": _READ_ONLY, "_meta": agent_open,
              "description": (f"Open a NEW CAD viewer tab beside the chat showing a local model ({FORMATS}). "
                              "Every call opens another tab, so call it only when cad_show reports that no "
@@ -537,7 +540,7 @@ class Server:
             return {"name": name, "title": title, "description": description, "inputSchema": schema,
                     "annotations": _READ_ONLY, "_meta": {"ui": {"visibility": ["app"]}}}
 
-        return [
+        tools = [
             app("cad_sync", "CAD sync", "This view's one call each second: what it shows and watches, and what is waiting for it.",
                 _object({"view": {"type": "string"}, "surface": {"type": "string"}, "model": {"type": ["string", "null"]},
                          "focused": {"type": "boolean"}, "closed": {"type": "boolean"}, "state": {"type": "object"},
@@ -546,6 +549,14 @@ class Server:
                 _object({"requestId": {"type": "string"}, "png": {"type": "string"}, "error": {"type": "string"},
                          _APP_TOKEN_ARGUMENT: _APP_TOKEN_SCHEMA}, ["requestId", _APP_TOKEN_ARGUMENT])),
         ]
+        if self._observations:
+            tool = app("cad_observation", "Save CAD observation", "Save a host-owned native document at the observed revision.",
+                       _object({"source": _object({"doc": {"type": "string"}, "revision": {"type": "string"}}, ["doc", "revision"]),
+                                "destination": {"type": "string"}, _APP_TOKEN_ARGUMENT: _APP_TOKEN_SCHEMA},
+                               ["source", "destination", _APP_TOKEN_ARGUMENT]))
+            tool["annotations"] = {**_READ_ONLY, "readOnlyHint": False}
+            tools.append(tool)
+        return tools
 
     # -- calls -----------------------------------------------------------------
 
@@ -570,6 +581,13 @@ class Server:
             if name in _AGENT_TOOLS:
                 self._arguments(name, arguments)
             result = handler(arguments, context)
+            if self._observations and name in ("cad_open", "cad_show") and not result.get("isError") and result.get("structuredContent", {}).get("delivered") != 0:
+                try:
+                    selected = self._model_path(arguments.get("source"))
+                    observed = self.tunnel.app.observation(selected)
+                except (ValueError, OSError, ToolFailed) as error:
+                    observed = {"error": str(error)}
+                result.setdefault("_meta", {})["dev.texttocad/observation"] = observed
             if not self.text and isinstance(result.get("structuredContent", {}).get("launch"), dict):
                 # MCP result metadata is delivered to the app, never put in the model's context.
                 result.setdefault("_meta", {})[_APP_TOKEN_META] = self._app_token
@@ -671,7 +689,7 @@ class Server:
         always has its channel, so its launches carry the page alone. The file handler's carry
         neither: it shows its file alone, with no Open in browser. Nor do launches where this server
         was given no engine (``viewer_url``), or the engine gives no page."""
-        if self._viewer_url is None or launch.get("surface") == "file":
+        if self._viewer_url is None or launch.get("surface") in ("file", "observation"):
             return
         from .browser import ViewerUnavailable
 
@@ -731,8 +749,21 @@ class Server:
             file = arguments.get("file")
             path = file_uri_path(file.get("resourceUri")) if isinstance(file, dict) else None
         model = self._model_path(path)
+        if arguments.get("observation") is True:
+            # The host owns these saved bytes; history never changes the session's live document.
+            launch = _stamped({"protocol": PROTOCOL, "page": "viewer", "model": model, "surface": "observation"})
+            return _text(f"Saved observation of {os.path.basename(model)}.", {"launch": launch})
         # The host's own file tree is this surface's navigation: the page shows the file alone.
         return _text(f"{os.path.basename(model)} is open in CAD.", {"launch": self._launch(model, surface="file")})
+
+    def _tool_cad_observation(self, arguments, context):
+        if not secrets.compare_digest(str(arguments.get("app") or ""), self._app_token):
+            raise ToolFailed("Only the CAD app can save an observation.", "not_app")
+        try:
+            path = self.tunnel.app.exports.save(arguments.get("source"), arguments.get("destination"))
+        except (ValueError, OSError) as error:
+            raise ToolFailed(str(error), "observation_failed") from error
+        return _text("The native CAD observation was saved.", {"file": path})
 
     def _cards(self, context: RequestContext) -> bool | None:
         """Whether this call's host shows CAD views: True, False, or None where nothing says yet. The
@@ -1068,6 +1099,8 @@ class Server:
         moves). A STEP or an ``.xbf`` the view shows tells it of a new version itself, through the
         engine's routes (``cadgen.viewer.documents``): no build feed rides here.
         """
+        if arguments.get("surface") == "observation":
+            raise RpcError(INVALID_PARAMS, "Saved observations do not register live views.")
         view_id = self._register(arguments, context)
         self._mounting.pop(view_id, None)
         sidebar = self.tabs and arguments.get("surface") == "sidebar"

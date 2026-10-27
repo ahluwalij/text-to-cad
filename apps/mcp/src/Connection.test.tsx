@@ -18,7 +18,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); viewer.props = null; });
 
 const PAGE = 'http://127.0.0.1:3245/6f1c2a4e-1b2c-5d3e-8f4a-0123456789ab?token=1893456000.mac';
 const ENGINE = 'http://127.0.0.1:3245';
-const launch: Launch = { protocol: 9, page: 'viewer', model: '/work/parts/a.step', surface: 'inline', view: 'cad-1-a', browser: PAGE, engine: ENGINE };
+const launch: Launch = { protocol: 10, page: 'viewer', model: '/work/parts/a.step', surface: 'inline', view: 'cad-1-a', browser: PAGE, engine: ENGINE };
 // What the Claude app's Code tab answers every tools/call of a card with.
 const REFUSAL = 'IPC not available for MCP tool call';
 

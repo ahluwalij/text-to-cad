@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import errno
 import json
 import ntpath
@@ -294,7 +295,7 @@ class TabServerTest(_Session):
     def test_an_agent_names_a_model_by_its_absolute_path_and_a_tab_reopens_on_it(self) -> None:
         opened = self.launch("cad_open", {"source": self.bracket})
         self.assertEqual({key: opened[key] for key in ("protocol", "page", "model", "surface")},
-                         {"protocol": 9, "page": "viewer", "model": self.bracket, "surface": "agent"})
+                         {"protocol": 10, "page": "viewer", "model": self.bracket, "surface": "agent"})
         # No tolerance: the page reads each part's one display mesh by its key.
         self.assertEqual(sorted(opened), ["model", "notice", "page", "pick", "platform", "protocol", "surface",
                                           "version"])
@@ -310,6 +311,30 @@ class TabServerTest(_Session):
         # A launch adds nothing to the library: the view does, once the model is on screen.
         self.assertEqual(self.server.recents.list(), [])
 
+    def test_a_host_can_open_a_saved_observation_without_replacing_the_live_document(self) -> None:
+        self.launch("cad_open", {"source": self.bracket})
+        tools = {tool["name"]: tool for tool in self.server.tools()}
+        self.assertEqual(tools["cad_file"]["_meta"].get("dev.texttocad/observation"), 1)
+        launch = self.launch("cad_file", {"file": {"resourceUri": Path(self.loose).as_uri()}, "observation": True})
+        self.assertEqual((launch["surface"], launch["model"]), ("observation", self.loose))
+        self.assertEqual(self.launch("cad_tab")["model"], self.bracket)
+        self.assertEqual(self.server.recents.list(), [])
+        with self.assertRaisesRegex(RpcError, "do not register"):
+            self.call("cad_sync", {"view": "saved", "surface": "observation", "model": self.loose})
+        self.assertNotIn("saved", self.server.views)
+
+    def test_an_observation_host_receives_the_canonical_file_and_exact_bytes_with_open_and_show(self) -> None:
+        capabilities = {"extensions": {**DECLARES_TABS["extensions"], "dev.texttocad/observations": {"version": 1}}}
+        self.server.handle("initialize", {"clientInfo": OTHER_HOST, "capabilities": capabilities}, None)
+        opened = self.call("cad_open", {"source": self.bracket})
+        self.assertEqual(opened["_meta"]["dev.texttocad/observation"], {"source": self.bracket, "sha256": hashlib.sha256(STL).hexdigest()})
+        self.call("cad_sync", {"view": "live", "surface": "tab", "model": self.bracket})
+        shown = self.call("cad_show", {"source": self.loose})
+        self.assertEqual(shown["_meta"]["dev.texttocad/observation"], {"source": self.loose, "sha256": hashlib.sha256(STL).hexdigest()})
+        denied = self.call("cad_observation", {"source": {"doc": "forged", "revision": "old"}, "destination": str(self.tmp / "forged.xbf")})
+        self.assertTrue(denied["isError"])
+        self.assertFalse((self.tmp / "forged.xbf").exists())
+
     def test_a_bad_path_is_the_tools_answer_not_a_protocol_error(self) -> None:
         missing = self.call("cad_open", {"source": str(self.workspace / "parts" / "nope.step")})
         self.assertTrue(missing["isError"])
@@ -322,6 +347,22 @@ class TabServerTest(_Session):
         for tool in ("cad_open", "cad_show"):
             self.assertIn("is not one", self.call(tool, {"source": str(script)})["content"][0]["text"], tool)
             self.assertIn("No file at", self.call(tool, {"source": f"{script}::cube"})["content"][0]["text"], tool)
+
+    def test_observation_refuses_dxf_external_references_without_following_them(self) -> None:
+        import ezdxf
+        capabilities = {"extensions": {**DECLARES_TABS["extensions"], "dev.texttocad/observations": {"version": 1}}}
+        self.server.handle("initialize", {"clientInfo": OTHER_HOST, "capabilities": capabilities}, None)
+        path = self.tmp / "drawing.dxf"
+        drawing = ezdxf.new()
+        drawing.modelspace().add_line((0, 0), (1, 1))
+        drawing.saveas(path)
+        result = self.call("cad_open", {"source": str(path)})
+        self.assertEqual(result["_meta"]["dev.texttocad/observation"]["sha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+        drawing.blocks.new("external", dxfattribs={"flags": 4})
+        drawing.saveas(path)
+        result = self.call("cad_open", {"source": str(path)})
+        self.assertIn("external files", result["_meta"]["dev.texttocad/observation"]["error"])
+        self.assertNotIn("isError", result, "live viewing remains available when history cannot capture the document")
 
     def test_cad_show_reaches_the_polling_view_without_opening_one(self) -> None:
         self.assertEqual(self.call("cad_show", {"source": self.bracket})["structuredContent"], {"delivered": 0})

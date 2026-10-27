@@ -10,12 +10,13 @@ import { isHostRefusal, type Channel } from './channel';
  * routes through `cad_http`. Every one of the page's calls carries its app capability (the launch's
  * `dev.texttocad/httpToken`): `cad_http` as a header, `cad_sync` and `cad_capture_reply` as `app`.
  */
-export const PROTOCOL = 9;
+export const PROTOCOL = 10;
 
 /** What an opening tool tells the page to show. The server decides all of it. */
 export interface Launch {
   protocol: number;
   page: 'home' | 'viewer';
+  /** observation renders host-owned immutable bytes, without registering a live view. */
   surface?: string;
   /** The model, by its absolute path; null on the home. */
   model: string | null;

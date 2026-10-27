@@ -21,6 +21,7 @@ import shutil
 import tempfile
 import threading
 import time
+import uuid
 from pathlib import Path
 
 FORMATS = {"step": ".step", "glb": ".glb", "stl": ".stl", "threemf": ".3mf", "dxf": ".dxf", "xbf": ".xbf", "original": ".xbf"}
@@ -231,6 +232,36 @@ class ExportJobs(Jobs):
             if job is not None and job["state"] == "ready":
                 job["fetched"] = True
                 self._prune()
+
+    def save(self, source, destination):
+        """Save a host's observation through the same revision-pinned export job as a download."""
+        if not isinstance(destination, str) or not destination:
+            raise ExportError("The observation destination must be absolute.")
+        destination = Path(destination)
+        if not destination.is_absolute():
+            raise ExportError("The observation destination must be absolute.")
+        job = self.create({"requestId": uuid.uuid4().hex, "epoch": self.epoch,
+                           "source": source, "format": "xbf"})
+        deadline = time.monotonic() + 180
+        while job["state"] in ("queued", "running"):
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise ExportError("The saved observation export did not finish in time.")
+            job = self.get(job["id"], after=job["sequence"], wait=min(25, left))
+        if job["state"] != "ready":
+            raise ExportError(job.get("error") or "The saved observation export failed.")
+        created = False
+        try:
+            with self.artifact(job["id"]) as artifact, destination.open("xb") as output:
+                created = True
+                with artifact.open("rb") as incoming:
+                    shutil.copyfileobj(incoming, output)
+            self.fetched(job["id"])
+        except BaseException:
+            if created:
+                destination.unlink(missing_ok=True)
+            raise
+        return str(destination)
 
     @contextlib.contextmanager
     def artifact(self, ident):

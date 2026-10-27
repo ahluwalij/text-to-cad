@@ -88,18 +88,36 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
 
 ## The rules
 
+- **Saved observations belong to their host.** A host that keeps immutable generated documents
+  alongside a conversation declares `dev.texttocad/observations: {version: 1}` in initialize's
+  extensions. Successful `cad_open` and delivered `cad_show` results then include
+  `_meta["dev.texttocad/observation"]`: the canonical selected file and its SHA-256, or a served
+  native document's `{doc, revision}`. The latter is saved by the app-only `cad_observation`
+  tool, with that exact source, an absolute destination and the app capability. It uses the
+  viewer's export jobs and revision guards; a changed source, failed export or timeout is an
+  unavailable observation, never permission to substitute the latest geometry. XBF retains
+  native materials, mechanisms, configurations and motion. Files are copied byte for byte by
+  the host and checked against their observed SHA-256; external GLB resources and DXF xrefs or
+  image dependencies are unavailable rather than copying an arbitrary dependency tree.
+  Once storage succeeds, the host calls `cad_file` with `observation: true`. Its metadata advertises
+  `dev.texttocad/observation: 1`; the returned protocol-10 launch has `surface: observation`.
+  This view renders only that saved file, without joining live views, following agent shows,
+  retiring earlier cards, browsing other files, editing source, or adding history files to Recents.
+  Camera, measurement, authored materials and native motion use the normal shared renderer.
+  The host owns durable storage and deletion; a live side tab keeps its original launch.
+
 - **One page, told what to show.** Every surface loads this one page. The tool
   that opened it returns a *launch* — `page` (`home` or `viewer`) and `model`, a
   file's absolute path, a model's document id, or none — and the page renders it: the shared
   CAD viewer showing that document, or the home. Agents name a file by its absolute path and a
   model by the id its script printed (a script is never a document), and
-  nothing here branches on a surface's name but one: `surface: file` (below).
+  file handlers and saved observations are the isolated surfaces (below).
 - **A launch is enough to start.** It also carries what the server is — its
   `protocol`, `version` and `platform` — and the home's carries its `recents`,
   so the page asks nothing before it draws. A launch from another build (a tab
   the host restored after an update, a past chat's card) says so: the page
   reads only its own protocol's.
-- **Every view but a file handler's has a home**: the library (the documents opened or built
+- **Every live view but a file handler's has a home**: the library (the documents opened or built
   before, in any view or the web viewer). Back to home, first in the menu the navbar's logo
   opens, goes to it. The sidebar (`cad_home`) and a tab with nothing to show open on it; a
   model opened from it is shown in place. The home has the same navbar (the logo's menu, Back

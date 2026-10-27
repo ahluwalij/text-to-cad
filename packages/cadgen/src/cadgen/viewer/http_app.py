@@ -308,6 +308,27 @@ class CadApp:
             return self.file_of(self.remember(home(self.recents.registry, record)))
         return None
 
+    def observation(self, source):
+        """The selected document's immutable identity, for a host preserving this tool result."""
+        if is_id(source):
+            selected = self.engine_documents.serve(source)
+            server = self.engine_documents.server
+            server.document(selected["doc"])  # acquire the same lazy model the page would read
+            with server.load_lock:
+                document = server.served.get(selected["doc"])
+                if document is None:
+                    raise ValueError("The selected document changed before it could be observed.")
+                return {"source": source, "document": {"doc": selected["doc"], "revision": document.version}}
+        if os.path.splitext(source)[1].lower() == ".dxf":
+            import ezdxf
+            drawing = ezdxf.readfile(source)
+            if any(block.block.dxf.flags & 12 for block in drawing.blocks) or drawing.objects.query("IMAGEDEF"):
+                raise ValueError("This DXF references external files. Export a standalone document to preserve it in history.")
+        entry = catalog_entry(source)
+        if not entry or not entry.get("hash"):
+            raise ValueError("The selected CAD document cannot be captured.")
+        return {"source": source, "sha256": entry["hash"]}
+
     def read_catalog(self, file=None, ident=None) -> dict:
         """The catalog of one document -- ``file``, an absolute path, registered by its id
         (``remember``), or ``ident``, a document's id: a file's or a model's the engine holds -- its
