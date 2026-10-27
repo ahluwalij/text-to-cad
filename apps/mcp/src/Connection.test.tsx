@@ -91,7 +91,7 @@ it('an engine the probe reaches runs the whole card over direct HTTP: the day li
     expect(request.credentials).toBe('omit');
   }
   // The host was asked once, the check that found it refuses; never again, and no view sync.
-  expect(bridge.callTool.mock.calls.map(([name]) => name)).toEqual(['cad_http']);
+  expect(bridge.callTool.mock.calls.map(([name]) => name)).toEqual(['cad_http_read']);
 });
 
 it('a host that carries calls without declaring it is checked once, then the card runs through it; a tab host is never checked', async () => {
@@ -104,7 +104,7 @@ it('a host that carries calls without declaring it is checked once, then the car
   expect(viewer.props).toBeNull();
   await waitFor(() => expect(viewer.props).not.toBeNull());
   expect(quiet.channel.state).toBe('open');
-  expect(quiet.bridge.callTool.mock.calls[0].slice(0, 2)).toMatchObject(['cad_http', { method: 'GET', url: 'http://cad.invalid/__cad/server' }]);
+  expect(quiet.bridge.callTool.mock.calls[0].slice(0, 2)).toMatchObject(['cad_http_read', { method: 'GET', url: 'http://cad.invalid/__cad/server' }]);
   cleanup();
   viewer.props = null;
   const tab = host({}, answered);

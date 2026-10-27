@@ -248,6 +248,33 @@ class TabServerTest(_Session):
             for method, expected in (("GET", 404), ("POST", 404)):
                 self.assertEqual(request("/__cad/features", {"x-cadgen-app": token, **GUARDED}, method=method)["structuredContent"]["status"], expected)
 
+    def test_read_only_http_requires_the_app_and_refuses_methods_and_bodies_before_routing(self) -> None:
+        token = self.call("cad_tab")["_meta"]["dev.texttocad/httpToken"]
+        other = Server(page=self.server.page)
+        other.handle("initialize", initialize_params({"clientInfo": CODEX}), None)
+        def request(method="GET", body="", capability=token):
+            return self.call("cad_http_read", {"method": method, "url": "/__cad/server", "body": body,
+                                               "headers": {"x-cadgen-app": capability}})
+        for method in ("GET", "HEAD"):
+            reply = request(method)["structuredContent"]
+            self.assertEqual(reply["status"], 200)
+            if method == "HEAD":
+                self.assertEqual(reply["body"], "")
+        with mock.patch.object(self.server.tunnel, "serve") as serve:
+            for capability in ("", "guessed", other._app_token):
+                self.assertTrue(request(capability=capability)["isError"])
+            for method in ("POST", "PUT", "PATCH", "DELETE", "OPTIONS", "CONNECT"):
+                self.assertTrue(request(method)["isError"])
+            for body in (base64.b64encode(b'{"share":true}').decode(), " ", False, {}, 0):
+                self.assertTrue(request(body=body)["isError"])
+            serve.assert_not_called()
+        # The router already records unexpected failures: the HTTP tool must not record them twice.
+        with mock.patch.object(self.server.tunnel, "serve", side_effect=RuntimeError("route failed")), \
+                mock.patch.object(self.server.analytics, "crashed") as crashed:
+            with self.assertRaisesRegex(RuntimeError, "route failed"):
+                request()
+            crashed.assert_not_called()
+
     def test_the_page_tools_answer_only_the_page_that_holds_the_session_s_capability(self) -> None:
         # The host is asked to keep app-only tools from the model; the server does not rely on it.
         other = Server(page=self.server.page)
@@ -275,7 +302,7 @@ class TabServerTest(_Session):
         self.assertEqual(agent, {"cad_open", "cad_show", "cad_view", "cad_screenshot", "cad_http"} | START.keys())
         # The page's own: its sync, its answer to a capture, and the viewer's routes, which carry the rest.
         page = {name for name, value in meta.items() if value.get("ui", {}).get("visibility") == ["app"]} - set(entrypoints)
-        self.assertEqual(page, {"cad_sync", "cad_capture_reply"})
+        self.assertEqual(page, {"cad_sync", "cad_capture_reply", "cad_http_read"})
         # All but one read: cad_http turns the person's telemetry off when they ask.
         self.assertEqual([name for name, tool in tools.items() if not tool["annotations"]["readOnlyHint"]], ["cad_http", "cad_export", "cad_snapshot"])
         uri = tools["cad_home"]["_meta"]["ui"]["resourceUri"]

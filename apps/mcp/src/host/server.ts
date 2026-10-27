@@ -7,8 +7,8 @@ import { isHostRefusal, type Channel } from './channel';
  * The launch/view protocol this page speaks with `cadgen mcp` (its `PROTOCOL`): a launch names a
  * model by its absolute path (`page: viewer`) or the home (`page: home`), and carries what the page
  * needs to start on it alone; a view makes one call a second (`cad_sync`) and reaches the viewer's
- * routes through `cad_http`. Every one of the page's calls carries its app capability (the launch's
- * `dev.texttocad/httpToken`): `cad_http` as a header, `cad_sync` and `cad_capture_reply` as `app`.
+ * routes through `cad_http_read` (GET/HEAD) and `cad_http` (writes). Every call carries the launch's
+ * `dev.texttocad/httpToken` capability: HTTP calls as a header, `cad_sync` and `cad_capture_reply` as `app`.
  */
 export const PROTOCOL = 10;
 
@@ -97,7 +97,7 @@ export function createServer(bridge: Pick<Bridge, 'callTool'>, appToken: string,
       call('cad_capture_reply', { requestId, ...reply, app: appToken }),
     /** One request to the viewer's routes (`host/tunnel.ts`): everything else the page asks of the server. */
     http: (args: { method: string; url: string; headers: Record<string, string>; body: string }, options?: CallOptions) =>
-      call<HttpReply>('cad_http', { ...args, headers: { ...args.headers, 'x-cadgen-app': appToken } }, options),
+      call<HttpReply>(args.method === 'GET' || args.method === 'HEAD' ? 'cad_http_read' : 'cad_http', { ...args, headers: { ...args.headers, 'x-cadgen-app': appToken } }, options),
   };
 }
 export type Server = ReturnType<typeof createServer>;

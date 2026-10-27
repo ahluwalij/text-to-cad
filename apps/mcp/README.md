@@ -233,7 +233,8 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   prompt destination's `kind`, a port's presence, `environment.compact`). A policy
   test enforces it: `tests/python/global/test_host_neutral_packages.py`.
 - **The web client's data path, unchanged.** `createCadClient` gets a `fetch`
-  that sends each request as a `cad_http` tool call against the placeholder
+  that sends GET/HEAD as read-only `cad_http_read` tool calls and writes as
+  `cad_http` calls against the placeholder
   origin `http://cad.invalid`; the server hands it to the viewer's own router,
   over its own model library and analytics. Everything the page asks of the
   server travels this way, as the web page asks its own: the models -- a STEP's
@@ -243,7 +244,8 @@ Inspection never builds. The web viewer's Export is a browser download; this pag
   answer and language, the update check. One route is the server's own, not the
   viewer's: `/__cad/browser/open`, which opens the web viewer's page of what the view shows
   in the person's browser, for Open in browser. Only the clipboard stays the host's: a
-  view copies through its frame. `cad_sync` and `cad_capture_reply` remain app-only
+  view copies through its frame. `cad_sync`, `cad_capture_reply` and the GET/HEAD-only,
+  body-free `cad_http_read` remain app-only
   and are absent in text-only hosts. `cad_http` is shared with agents: without
   an app capability, only telemetry status and opt-out are authorized. Every
   page launch includes a session capability in result `_meta["dev.texttocad/httpToken"]`,
@@ -372,9 +374,9 @@ values have no reader and cannot hide it. Settings files need no conversion.
 | `bridge.ts` | JSON-RPC 2.0 over `postMessage`: requests, the opening tool's result, host context, teardown; a failed request's `kind` (the host refused it, it timed out, the page closed) |
 | `channel.ts` | whether the host carries the page's calls to its server: what it declared (`serverTools`, `openLinks`), then what its calls showed (`Connection.tsx` routes the card by it) |
 | `direct.ts` | the engine reached over HTTP where the host carries no call: the launch's `engine` and day link, the probe, and the `fetch` that swaps for the tunnel's |
-| `server.ts` | typed calls to the page's three tools: its sync, its answer to a capture, and `cad_http` |
+| `server.ts` | typed calls to the page's sync, capture answer and read/write HTTP tools |
 | `capture.ts` | a capture once the view shows the model asked about, loaded and drawn (`captureSettled`, within `CAPTURE_SETTLE_MS`), and the PNG shrunk to fit one reply (`fitCapture`) |
-| `tunnel.ts` | the `fetch` over `cad_http`, a long body a range at a time, and the CAD client over it (`App.tsx` makes one per view): the library, Open, Reveal and the person's settings among its requests |
+| `tunnel.ts` | the `fetch` over `cad_http_read`/`cad_http`, a long body a range at a time, and the CAD client over it (`App.tsx` makes one per view): the library, Open, Reveal and the person's settings among its requests |
 | `prompt.ts` | Quick Edit's chat: `chatReach`, what the host's chat takes, and the prompt port over it — Queue through `ui/update-model-context` (a text block titled `Quick edit · <file>` naming the snapshot path, kept until the host clears its model context), Send through `ui/message` — with references as absolute paths (Copy Prompt spells them as copied references are) |
 | `live.ts`, `sync.ts` | the mounted view's live controller (`@text-to-cad/ui/host`'s registry), and its sync (`cad_sync`), every second: its state for the agent, the agent's requests (`show`, `capture`) and the catalog's revision |
 | `presentation.ts` | how the host presents the page, and the election that retires older inline views |

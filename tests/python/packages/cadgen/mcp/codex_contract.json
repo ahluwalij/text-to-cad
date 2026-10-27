@@ -547,6 +547,53 @@
     "openWorldHint": false,
     "readOnlyHint": true
    },
+   "description": "Read a viewer route with GET or HEAD. Requires this view's session capability in x-cadgen-app; no request body.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "body": {
+      "maxLength": 0,
+      "type": "string"
+     },
+     "headers": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "type": "object"
+     },
+     "method": {
+      "enum": [
+       "GET",
+       "HEAD"
+      ],
+      "type": "string"
+     },
+     "url": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "method",
+     "url"
+    ],
+    "type": "object"
+   },
+   "name": "cad_http_read",
+   "title": "Read CAD HTTP"
+  },
+  {
+   "_meta": {
+    "ui": {
+     "visibility": [
+      "app"
+     ]
+    }
+   },
+   "annotations": {
+    "destructiveHint": false,
+    "openWorldHint": false,
+    "readOnlyHint": true
+   },
    "description": "This view's one call each second: what it shows and watches, and what is waiting for it.",
    "inputSchema": {
     "additionalProperties": false,

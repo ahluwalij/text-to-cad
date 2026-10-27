@@ -368,9 +368,9 @@ class Server:
         except Exception as error:
             # A request that failed for no reason its client gave: this server's crash, answered as the
             # protocol answers one (an internal error), and counted (``cadgen/analytics.py``) -- a page's
-            # request (``cad_http``) by the viewer's routes, which counted it already (``tunnel.py``).
+            # HTTP request by the viewer's routes, which counted it already (``tunnel.py``).
             calling = method == "tools/call"
-            if not (calling and params.get("name") == "cad_http"):
+            if not (calling and params.get("name") in ("cad_http", "cad_http_read")):
                 self.analytics.crashed(error, "tool" if calling else "request", tool=params.get("name") if calling else None)
             raise
 
@@ -534,13 +534,16 @@ class Server:
         ]
 
     def _page_tools(self) -> list[dict[str, Any]]:
-        """The tools only the page calls: its sync and its answer to a capture."""
+        """The tools only the page calls: its sync, capture answer and read-only HTTP requests."""
 
         def app(name: str, title: str, description: str, schema: dict[str, Any]) -> dict[str, Any]:
             return {"name": name, "title": title, "description": description, "inputSchema": schema,
                     "annotations": _READ_ONLY, "_meta": {"ui": {"visibility": ["app"]}}}
 
         tools = [
+            app("cad_http_read", "Read CAD HTTP", "Read a viewer route with GET or HEAD. Requires this view's session capability in x-cadgen-app; no request body.",
+                _object({**_HTTP_TOOL["inputSchema"]["properties"], "method": {"type": "string", "enum": ["GET", "HEAD"]},
+                         "body": {"type": "string", "maxLength": 0}}, ["method", "url"])),
             app("cad_sync", "CAD sync", "This view's one call each second: what it shows and watches, and what is waiting for it.",
                 _object({"view": {"type": "string"}, "surface": {"type": "string"}, "model": {"type": ["string", "null"]},
                          "focused": {"type": "boolean"}, "closed": {"type": "boolean"}, "state": {"type": "object"},
@@ -599,7 +602,7 @@ class Server:
             return _text(str(failure), error=True)
         finally:
             self.analytics.called(name, ok, reason)
-            if name not in ("cad_sync", "cad_http"):
+            if name not in ("cad_sync", "cad_http", "cad_http_read"):
                 LOG.info("%s %.0fms", name, (time.monotonic() - started) * 1000)
 
     def _refused(self, name: Any, reason: str) -> None:
@@ -1149,7 +1152,16 @@ class Server:
         accepted = self.views.reply(request_id, reply) or (self.tabs and self.sidebar_views.answer(request_id, reply))
         return _data({"accepted": bool(accepted)})
 
+    def _tool_cad_http_read(self, arguments, context):
+        # Enforce the annotation at the server boundary, not just in the advertised schema.
+        if arguments.get("method") not in ("GET", "HEAD") or arguments.get("body", "") != "":
+            raise ToolFailed("Read-only HTTP requires GET or HEAD and no request body.", "bad_request")
+        return self._http(arguments, app_only=True)
+
     def _tool_cad_http(self, arguments, context):
+        return self._http(arguments)
+
+    def _http(self, arguments, *, app_only=False):
         try:
             body = base64.b64decode(arguments.get("body") or "", validate=True)
         except (ValueError, binascii.Error) as error:
@@ -1163,6 +1175,8 @@ class Server:
         if token and not app:
             # A view opened in an earlier session (the engine restarted under its host) holds that one's.
             raise ToolFailed("This CAD view was opened before CAD restarted: close it and open CAD again.", "bad_request")
+        if app_only and not app:
+            raise ToolFailed("This HTTP tool is available only to the CAD view.", "bad_request")
         method, url = str(arguments.get("method") or "GET"), str(arguments.get("url") or "")
         from cadgen.viewer import url_norm
 
