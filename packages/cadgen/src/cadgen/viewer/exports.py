@@ -267,9 +267,11 @@ class ExportJobs(Jobs):
                 (after.st_size, after.st_mtime_ns, after.st_ctime_ns) or digest.hexdigest() != spec["revision"]):
             raise ExportError("The selected CAD revision changed before it could be preserved.", 409)
         if source.suffix.lower() == ".glb":
+            from cadgen._internal.primitive_mesh import GLB_MAGIC, GLB_JSON_CHUNK
             with target.open("rb") as incoming:
                 header = incoming.read(20)
-                if len(header) != 20 or header[:4] != b"glTF" or int.from_bytes(header[16:20], "little") != 0x4e4f534a:
+                if (len(header) != 20 or int.from_bytes(header[:4], "little") != GLB_MAGIC
+                        or int.from_bytes(header[16:20], "little") != GLB_JSON_CHUNK):
                     raise ExportError("The GLB document has no readable scene.")
                 length = int.from_bytes(header[12:16], "little")
                 if length > 16 * 1024**2 or length + 20 > size:
